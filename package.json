@@ -23,13 +23,13 @@
   ],
   "preferences": [
     {
-      "name": "preference-name",
-      "title": "Preference Title",
-      "description": "Preference description.",
+      "name": "scoopRoot",
+      "title": "Scoop Root",
+      "description": "The root directory for Scoop.",
       "type": "textfield",
-      "defaultValue": "default-value",
-      "placeholder": "placeholder-text",
-      "required": true
+      "defaultValue": "",
+      "placeholder": "e.g. D:/scoop",
+      "required": false
     }
   ],
   "scripts": {
