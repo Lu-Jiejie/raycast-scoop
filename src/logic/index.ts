@@ -1,62 +1,8 @@
 import { exec } from 'node:child_process'
 import { readdir, stat } from 'node:fs/promises'
 import { promisify } from 'node:util'
-import { showToast, Toast } from '@raycast/api'
 
 export const execPromise = promisify(exec)
-
-export function showSuccessToast(title: string, message: string) {
-  return showToast({
-    style: Toast.Style.Success,
-    title,
-    message,
-  })
-}
-
-export function showErrorToast(title: string, message: string) {
-  return showToast({
-    style: Toast.Style.Failure,
-    title,
-    message,
-  })
-}
-
-export function showLoadingToast(title: string, message: string) {
-  return showToast({
-    style: Toast.Style.Animated,
-    title,
-    message,
-  })
-}
-
-export async function withErrorHandling<T>(
-  operation: () => Promise<T> | T,
-  errorToast: (errorMessage: string) => {
-    title: string
-    message: string
-  },
-  successToast?: {
-    title: string
-    message: string
-  },
-): Promise<T | null> {
-  try {
-    const result = await operation()
-    // Only show success toast when operation succeeds
-    if (successToast) {
-      await showSuccessToast(successToast.title, successToast.message)
-    }
-    return result
-  }
-  catch (error) {
-    const { title, message } = errorToast(error instanceof Error ? error.message : 'Unknown error occurred')
-    await showErrorToast(
-      title,
-      message,
-    )
-    return null
-  }
-}
 
 export async function isFile(path: string): Promise<boolean> {
   try {

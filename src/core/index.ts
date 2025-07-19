@@ -5,35 +5,37 @@ import { getPreferenceValues } from '@raycast/api'
 import { clean } from 'semver'
 import { execPromise, getAllDirs, getFirstFlatItem, isFile, toWindowsPath } from '../logic'
 
+/**
+ * Scoop manifest checkver configuration
+ * Can be either a regex string, "github", or a complex configuration object
+ */
 type CheckverConfig
-  // 简单字符串 - 直接正则表达式或 "github"
-  = | string
-  // 对象配置 - 包含所有可能的属性
+  = | string // Direct regex string or "github"
     | {
-    // 基本源类型 - 通常只使用其中一个
-      github?: string // GitHub 仓库 URL
-      sourceforge?: string // SourceForge 项目名
-      url?: string // 自定义 URL
+      // Source type options - typically only one is used
+      github?: string // GitHub repository URL
+      sourceforge?: string // SourceForge project name
+      url?: string // Custom URL
 
-      // 源相关配置
-      sourceforgepath?: string // SourceForge 路径
+      // Source path configuration
+      sourceforgepath?: string // SourceForge path
 
-      // 提取方法 - 可以组合使用
-      regex?: string // 正则表达式
-      re?: string // regex 别名
-      jsonpath?: string // JSONPath 表达式
-      jp?: string // jsonpath 别名
-      xpath?: string // XPath 表达式
+      // Extraction methods - can be combined
+      regex?: string // Regular expression
+      re?: string // Regex alias
+      jsonpath?: string // JSONPath expression
+      jp?: string // JSONPath alias
+      xpath?: string // XPath expression
 
-      // 结果处理
-      replace?: string // 替换匹配值
-      reverse?: boolean // 是否匹配最后一次出现
+      // Result processing
+      replace?: string // Replace matching value
+      reverse?: boolean // Match last occurrence instead of first
 
-      // 请求配置
-      userAgent?: string // 自定义 User-Agent
+      // Request configuration
+      userAgent?: string // Custom User-Agent
 
-      // 复杂脚本
-      script?: string | string[] // PowerShell 命令
+      // Complex scripting
+      script?: string | string[] // PowerShell commands
     }
 
 export interface AppInfo {
@@ -51,7 +53,6 @@ export class Scoop {
   private scoopRoot: string
 
   constructor() {
-    // get scoop root from preferences
     const settings = getPreferenceValues<{ scoopRoot: string }>()
     this.scoopRoot = settings.scoopRoot.trim() || ''
   }
@@ -71,8 +72,11 @@ export class Scoop {
     }
   }
 
+  /**
+   * Extract executable path from Scoop app manifest
+   * Looks for shortcuts, bin entries, and architecture-specific entries
+   */
   private getAppExeFromManifest(manifestContent: any): string {
-    // shortcuts
     if (manifestContent.shortcuts) {
       const firstShortcut = getFirstFlatItem(manifestContent.shortcuts)
       if (typeof firstShortcut === 'string') {
@@ -80,7 +84,6 @@ export class Scoop {
       }
     }
 
-    // bin
     if (manifestContent.bin) {
       const firstBin = getFirstFlatItem(manifestContent.bin)
       if (typeof firstBin === 'string') {
@@ -88,7 +91,6 @@ export class Scoop {
       }
     }
 
-    // architecture shortcut or bin
     if (manifestContent.architecture) {
       const processArch = arch === 'x64'
         ? '64bit'
@@ -103,7 +105,6 @@ export class Scoop {
         return ''
       }
 
-      // shortcuts
       if (archConfig.shortcuts) {
         const firstShortcut = getFirstFlatItem(archConfig.shortcuts)
         if (typeof firstShortcut === 'string') {
@@ -111,7 +112,6 @@ export class Scoop {
         }
       }
 
-      // bin
       if (archConfig.bin) {
         const firstBin = getFirstFlatItem(archConfig.bin)
         if (typeof firstBin === 'string') {
@@ -123,7 +123,10 @@ export class Scoop {
     return ''
   }
 
-  // should not return "v" prefix
+  /**
+   * Check for new version of an app
+   * Returns cleaned version string without 'v' prefix
+   */
   async checkNewVersion(app: AppInfo): Promise<string> {
     const format = (rawVersion: string) => {
       return clean(rawVersion) || ''
@@ -156,7 +159,6 @@ export class Scoop {
           return ''
         }
         const match = matches[0]
-        // 返回第一个捕获组（如果存在），否则返回整个匹配
         return match[1] ?? match[0] ?? ''
       }
       else if (typeof checkver === 'object' && checkver !== null) {
@@ -242,7 +244,13 @@ export class Scoop {
       return ''
     }
 
-    return format(await _checkNewVersion(app))
+    try {
+      return format(await _checkNewVersion(app))
+    }
+    catch {
+      // return '' means failed to check version
+      return ''
+    }
   }
 
   async getAppInfo(appName: string): Promise<AppInfo | null> {
@@ -281,15 +289,30 @@ export class Scoop {
   }
 
   async updateNewVersion(app: AppInfo) {
-    await execPromise(`scoop update ${app.bucket}/${app.appName}`)
+    try {
+      await execPromise(`scoop update ${app.bucket}/${app.appName}`)
+    }
+    catch (error) {
+      throw new Error(`无法更新应用 ${app.appName}: ${error instanceof Error ? error.message : String(error)}`)
+    }
   }
 
   async uninstallApp(app: AppInfo) {
-    await execPromise(`scoop uninstall ${app.bucket}/${app.appName}`)
+    try {
+      await execPromise(`scoop uninstall ${app.bucket}/${app.appName}`)
+    }
+    catch (error) {
+      throw new Error(`无法卸载应用 ${app.appName}: ${error instanceof Error ? error.message : String(error)}`)
+    }
   }
 
   async resetApp(app: AppInfo) {
-    await execPromise(`scoop reset ${app.bucket}/${app.appName}`)
+    try {
+      await execPromise(`scoop reset ${app.bucket}/${app.appName}`)
+    }
+    catch (error) {
+      throw new Error(`无法重置应用 ${app.appName}: ${error instanceof Error ? error.message : String(error)}`)
+    }
   }
 
   async getScoopList() {

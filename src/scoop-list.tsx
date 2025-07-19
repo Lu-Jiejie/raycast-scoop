@@ -4,9 +4,11 @@ import { Action, ActionPanel, Alert, Color, confirmAlert, Icon, List } from '@ra
 import { useCachedState } from '@raycast/utils'
 import { useEffect, useState } from 'react'
 import { Scoop } from './core'
-import { showErrorToast, showLoadingToast, showSuccessToast, withErrorHandling } from './logic'
+import { showErrorToast, showLoadingToast, showSuccessToast, ToastMessages, withErrorHandling } from './logic/toast'
 
-// Cache related types and constants
+/**
+ * App version cache management interfaces
+ */
 interface AppVersionInfo {
   [appName: string]: {
     newVersion: string
@@ -22,7 +24,7 @@ interface AppVersionStatus {
   versionTagColor: Color
 }
 
-const CACHE_TTL = 5 * 60 * 1000 // 5 minutes cache TTL
+const CACHE_TTL = 5 * 60 * 1000 // Cache time-to-live: 5 minutes
 const APP_VERSION_INFO_CACHE_KEY = 'scoop-app-version-info'
 const APP_LIST_CACHE_KEY = 'scoop-app-list'
 
@@ -49,7 +51,9 @@ export default function command() {
     }
   }
 
-  // Check if cache is expired
+  /**
+   * Determines if the app version cache has expired
+   */
   const isCacheExpired = () => {
     if (apps.length === 0)
       return true
@@ -64,21 +68,16 @@ export default function command() {
 
   useEffect(() => {
     (async () => {
-      // Use cache if available and not expired
       if (apps.length > 0 && !isCacheExpired()) {
         setIsLoading(false)
         return
       }
 
-      // Refresh data if no cache or cache expired
       const result = await withErrorHandling(
         async () => {
           return await scoop.getScoopList()
         },
-        errorMessage => ({
-          title: 'Error loading Scoop apps',
-          message: errorMessage,
-        }),
+        errorMessage => ToastMessages.APP_LIST.LOADING_FAILED(errorMessage),
       )
 
       if (result) {
@@ -118,23 +117,29 @@ export default function command() {
   }
 
   async function handleCheckNewVersion(app: AppInfo) {
-    const loadingToast = await showLoadingToast('Checking for Updates', `Checking ${app.appName} for new version...`)
+    const { title, message } = ToastMessages.VERSION_CHECK.LOADING(app.appName)
+    const loadingToast = await showLoadingToast(title, message)
     const newVersion = await scoop.checkNewVersion(app)
     loadingToast.hide()
 
     if (newVersion !== '' && newVersion !== app.version) {
-      showSuccessToast(app.appName, `New version available: ${newVersion}`)
+      const { title, message } = ToastMessages.VERSION_CHECK.NEW_AVAILABLE(app.appName, newVersion)
+      showSuccessToast(title, message)
     }
     else if (newVersion === '') {
-      showErrorToast(app.appName, 'Failed to check for new version')
+      const { title, message } = ToastMessages.VERSION_CHECK.FAILED(app.appName)
+      showErrorToast(title, message)
     }
     else {
-      showSuccessToast(app.appName, 'Already on the latest version')
+      const { title, message } = ToastMessages.VERSION_CHECK.UP_TO_DATE(app.appName)
+      showSuccessToast(title, message)
     }
     return newVersion
   }
 
-  // Check all apps for new versions
+  /**
+   * Check all installed apps for available updates
+   */
   async function handleCheckAllNewVersions() {
     const loadingToast = await showLoadingToast('Checking for Updates', 'Checking all apps for new versions...')
 
@@ -155,22 +160,16 @@ export default function command() {
 
     const updatesAvailable = apps.filter(app => getAppVersionStatus(app).hasUpdate)
 
-    if (updatesAvailable.length > 0) {
-      showSuccessToast(
-        'Check Completed',
-        `Found ${updatesAvailable.length} apps with updates available`,
-      )
-    }
-    else {
-      showSuccessToast('Check Completed', 'All apps are up-to-date')
-    }
+    const { title, message } = ToastMessages.VERSION_CHECK.COMPLETED(updatesAvailable.length)
+    showSuccessToast(title, message)
   }
 
   async function handleUpdateNewVersion(app: AppInfo) {
     const versionStatus = getAppVersionStatus(app)
 
     if (!versionStatus.hasUpdate) {
-      showSuccessToast('No Update Available', 'App is already on the latest version')
+      const { title, message } = ToastMessages.VERSION_CHECK.UP_TO_DATE(app.appName)
+      showSuccessToast(title, message)
       return
     }
     const confirmed = await confirmAlert({
@@ -189,7 +188,8 @@ export default function command() {
     if (!confirmed)
       return
 
-    const loadingToast = await showLoadingToast('Updating App', `Updating ${app.appName} to version ${versionStatus.newVersion}...`)
+    const { title, message } = ToastMessages.APP_UPDATE.LOADING(app.appName, versionStatus.newVersion)
+    const loadingToast = await showLoadingToast(title, message)
 
     const result = await withErrorHandling(
       async () => {
@@ -198,14 +198,8 @@ export default function command() {
         loadingToast.hide()
         return await scoop.getAppInfo(app.appName)
       },
-      errorMessage => ({
-        title: 'Error updating app',
-        message: errorMessage,
-      }),
-      {
-        title: 'App Updated',
-        message: `Successfully updated ${app.appName} to the latest version.`,
-      },
+      errorMessage => ToastMessages.APP_UPDATE.FAILED(app.appName, errorMessage),
+      ToastMessages.APP_UPDATE.SUCCESS(app.appName),
     )
 
     if (result) {
@@ -219,7 +213,8 @@ export default function command() {
         return newCache
       })
 
-      showSuccessToast('Update Complete', `Successfully updated ${app.appName} to version ${result.version}`)
+      const { title, message } = ToastMessages.APP_UPDATE.SUCCESS(app.appName, result.version)
+      showSuccessToast(title, message)
     }
   }
 
@@ -227,7 +222,8 @@ export default function command() {
     const appsToUpdate = apps.filter(app => getAppVersionStatus(app).hasUpdate)
 
     if (appsToUpdate.length === 0) {
-      showSuccessToast('No Updates', 'All apps are already up-to-date')
+      const { title, message } = ToastMessages.VERSION_CHECK.UP_TO_DATE('all apps')
+      showSuccessToast(title, message)
       return
     }
 
@@ -248,31 +244,60 @@ export default function command() {
 
     const loadingToast = await showLoadingToast('Updating Apps', `Updating ${appsToUpdate.length} apps...`)
 
-    for (const app of appsToUpdate) {
-      try {
-        await scoop.updateNewVersion(app)
-        const updatedApp = await scoop.getAppInfo(app.appName)
+    const updateResults = await Promise.allSettled(
+      appsToUpdate.map(async (app) => {
+        try {
+          await scoop.updateNewVersion(app)
+          const updatedApp = await scoop.getAppInfo(app.appName)
+          return {
+            success: true,
+            app,
+            updatedApp,
+          }
+        }
+        catch (error) {
+          return {
+            success: false,
+            app,
+            error: error instanceof Error ? error.message : String(error),
+          }
+        }
+      }),
+    )
 
-        if (updatedApp) {
+    updateResults.forEach((result) => {
+      if (result.status === 'fulfilled') {
+        const { success, app, updatedApp, error } = result.value
+
+        if (success && updatedApp) {
+          // Update app in state
           setApps(currentCachedApps =>
             currentCachedApps.map(a => a.appName === updatedApp.appName ? updatedApp : a),
           )
+
+          // Remove from version cache
           setAppVersionInfo((prev) => {
             const newCache = { ...prev }
             delete newCache[app.appName]
             return newCache
           })
 
-          showSuccessToast('App Updated', `Successfully updated ${app.appName} to version ${updatedApp.version}`)
+          const { title, message } = ToastMessages.APP_UPDATE.SUCCESS(app.appName, updatedApp.version)
+          showSuccessToast(title, message)
+        }
+        else if (!success) {
+          const { title, message } = ToastMessages.APP_UPDATE.FAILED(app.appName, error)
+          showErrorToast(title, message)
         }
       }
-      catch (error) {
-        showSuccessToast('Update Failed', `Failed to update ${app.appName}: ${error instanceof Error ? error.message : String(error)}`)
+      else if (result.status === 'rejected') {
+        console.error('Unexpected promise rejection:', result.reason)
       }
-    }
+    })
 
     loadingToast.hide()
-    showSuccessToast('Updates Complete', `Finished updating apps`)
+    const { title, message } = ToastMessages.BULK_UPDATE.COMPLETED(appsToUpdate.length)
+    showSuccessToast(title, message)
   }
 
   async function handleRefreshAppList() {
@@ -294,23 +319,18 @@ export default function command() {
 
     setIsLoading(true)
 
-    const loadingToast = await showLoadingToast('Reloading App List', 'Refreshing Scoop app list...')
+    const { title, message } = ToastMessages.APP_LIST.REFRESH_LOADING()
+    const loadingToast = await showLoadingToast(title, message)
 
-    // 清除所有缓存
+    // Clear version cache
     setAppVersionInfo({})
 
     const result = await withErrorHandling(
       async () => {
         return await scoop.getScoopList()
       },
-      errorMessage => ({
-        title: 'Error loading Scoop apps',
-        message: errorMessage,
-      }),
-      {
-        title: 'App List Reloaded',
-        message: 'Successfully refreshed the app list',
-      },
+      errorMessage => ToastMessages.APP_LIST.LOADING_FAILED(errorMessage),
+      ToastMessages.APP_LIST.REFRESH_COMPLETED(),
     )
 
     if (result) {
@@ -322,7 +342,6 @@ export default function command() {
   }
 
   async function handleUninstallApp(app: AppInfo) {
-    // Confirmation dialog
     const confirmed = await confirmAlert({
       title: 'Uninstall App',
       message: `Are you sure you want to uninstall ${app.appName}?`,
@@ -339,7 +358,8 @@ export default function command() {
     if (!confirmed)
       return
 
-    const loadingToast = await showLoadingToast('Uninstalling', `Uninstalling ${app.appName}...`)
+    const { title, message } = ToastMessages.APP_UNINSTALL.LOADING(app.appName)
+    const loadingToast = await showLoadingToast(title, message)
 
     const result = await withErrorHandling(
       async () => {
@@ -347,21 +367,13 @@ export default function command() {
         loadingToast.hide()
         return true
       },
-      errorMessage => ({
-        title: 'Error Uninstalling App',
-        message: errorMessage,
-      }),
-      {
-        title: 'App Uninstalled',
-        message: `Successfully uninstalled ${app.appName}`,
-      },
+      errorMessage => ToastMessages.APP_UNINSTALL.FAILED(app.appName, errorMessage),
+      ToastMessages.APP_UNINSTALL.SUCCESS(app.appName),
     )
 
     if (result) {
-      // Remove the app from the apps list
       setApps(currentApps => currentApps.filter(a => a.appName !== app.appName))
 
-      // Remove from version cache
       setAppVersionInfo((prev) => {
         const newCache = { ...prev }
         delete newCache[app.appName]
@@ -371,7 +383,6 @@ export default function command() {
   }
 
   async function handleResetApp(app: AppInfo) {
-    // Confirmation dialog
     const confirmed = await confirmAlert({
       title: 'Reset App',
       message: `Are you sure you want to reset ${app.appName}? This will re-register shortcuts and environment variables.`,
@@ -388,7 +399,8 @@ export default function command() {
     if (!confirmed)
       return
 
-    const loadingToast = await showLoadingToast('Resetting App', `Resetting ${app.appName}...`)
+    const { title, message } = ToastMessages.APP_RESET.LOADING(app.appName)
+    const loadingToast = await showLoadingToast(title, message)
 
     await withErrorHandling(
       async () => {
@@ -396,14 +408,8 @@ export default function command() {
         loadingToast.hide()
         return true
       },
-      errorMessage => ({
-        title: 'Error Resetting App',
-        message: errorMessage,
-      }),
-      {
-        title: 'App Reset',
-        message: `Successfully reset ${app.appName}`,
-      },
+      errorMessage => ToastMessages.APP_RESET.FAILED(app.appName, errorMessage),
+      ToastMessages.APP_RESET.SUCCESS(app.appName),
     )
   }
 
