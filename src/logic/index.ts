@@ -1,23 +1,9 @@
 import { exec } from 'node:child_process'
-import { access, constants, stat } from 'node:fs/promises'
+import { readdir, stat } from 'node:fs/promises'
+import { promisify } from 'node:util'
 import { showToast, Toast } from '@raycast/api'
 
-export function execPromise(command: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    exec(command, async (error) => {
-      // fix: explore /select often exits with code 1, but it still works
-      if (command.startsWith('explorer /select') && error?.code === 1) {
-        resolve()
-      }
-      if (error) {
-        reject(error)
-      }
-      else {
-        resolve()
-      }
-    })
-  })
-}
+export const execPromise = promisify(exec)
 
 export function showSuccessToast(title: string, message: string) {
   return showToast({
@@ -30,6 +16,14 @@ export function showSuccessToast(title: string, message: string) {
 export function showErrorToast(title: string, message: string) {
   return showToast({
     style: Toast.Style.Failure,
+    title,
+    message,
+  })
+}
+
+export function showLoadingToast(title: string, message: string) {
+  return showToast({
+    style: Toast.Style.Animated,
     title,
     message,
   })
@@ -48,7 +42,7 @@ export async function withErrorHandling<T>(
 ): Promise<T | null> {
   try {
     const result = await operation()
-    // 只有在操作成功时才显示成功提示
+    // Only show success toast when operation succeeds
     if (successToast) {
       await showSuccessToast(successToast.title, successToast.message)
     }
@@ -71,5 +65,33 @@ export async function isFile(path: string): Promise<boolean> {
   }
   catch {
     return false
+  }
+}
+
+export function toWindowsPath(path: string): string {
+  return path.replaceAll('/', '\\')
+}
+
+export function toUnixPath(path: string): string {
+  return path.replaceAll('\\', '/')
+}
+
+export function getFirstFlatItem<T>(item: T | T[] | T[][]): T | undefined {
+  if (!Array.isArray(item)) {
+    return item
+  }
+
+  const flattened = (item as any[]).flat(Infinity)
+  return flattened.length > 0 ? flattened[0] : undefined
+}
+
+export async function getAllDirs(dir: string): Promise<string[]> {
+  try {
+    const entries = await readdir(dir, { withFileTypes: true })
+    const paths = entries.filter(dirent => dirent.isDirectory()).map(dirent => dirent.name)
+    return paths
+  }
+  catch (error) {
+    throw new Error((error as Error).message)
   }
 }

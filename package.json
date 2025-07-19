@@ -42,13 +42,15 @@
   },
   "dependencies": {
     "@raycast/api": "^1.100.3",
-    "@raycast/utils": "^2.2.0"
+    "@raycast/utils": "^2.2.0",
+    "semver": "^7.7.2"
   },
   "devDependencies": {
     "@antfu/eslint-config": "^4.16.2",
     "@raycast/eslint-config": "^2.0.4",
     "@types/node": "^20.19.7",
     "@types/react": "^19.1.8",
+    "@types/semver": "^7.7.0",
     "eslint": "^9.31.0",
     "esno": "^4.8.0",
     "lint-staged": "^16.1.2",
