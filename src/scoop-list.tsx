@@ -2,7 +2,7 @@ import type { AppInfo } from './core'
 import { join } from 'node:path/posix'
 import { Action, ActionPanel, Alert, Color, confirmAlert, Icon, List } from '@raycast/api'
 import { useCachedState } from '@raycast/utils'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Scoop } from './core'
 import { showErrorToast, showLoadingToast, showSuccessToast, ToastMessages, withErrorHandling } from './logic/toast'
 
@@ -33,7 +33,32 @@ export default function command() {
   const [isLoading, setIsLoading] = useState(true)
   const [appVersionInfo, setAppVersionInfo] = useCachedState<AppVersionInfo>(APP_VERSION_INFO_CACHE_KEY, {})
   const [apps, setApps] = useCachedState<AppInfo[]>(APP_LIST_CACHE_KEY, [])
+  const [selectedBucket, setSelectedBucket] = useState<string | null>(null)
 
+  /**
+   * Get unique buckets from apps list (memoized)
+   */
+  const buckets = useMemo(() => {
+    const bucketsSet = new Set<string>()
+    apps.forEach((app) => {
+      if (app.bucket)
+        bucketsSet.add(app.bucket)
+    })
+    return Array.from(bucketsSet).sort()
+  }, [apps])
+
+  /**
+   * Filter apps by selected bucket (memoized)
+   */
+  const filteredApps = useMemo(() => {
+    return selectedBucket
+      ? apps.filter(app => app.bucket === selectedBucket)
+      : apps
+  }, [apps, selectedBucket])
+
+  /**
+   * Get version status for an app (helper function)
+   */
   const getAppVersionStatus = (app: AppInfo): AppVersionStatus => {
     const cachedVersionInfo = appVersionInfo[app.appName]
     const hasUpdate = !!(cachedVersionInfo?.newVersion
@@ -87,34 +112,51 @@ export default function command() {
     })()
   }, [])
 
-  const getShortDescription = (app: AppInfo) => {
-    const availableSpace = 70
+  /**
+   * Generate shortened description for apps in the list view
+   * Memoized to improve rendering performance
+   */
+  const getShortDescription = useMemo(() => {
+    const cache = new Map<string, string>()
 
-    const versionStatus = getAppVersionStatus(app)
-    const versionTagLength = versionStatus.versionTag.length
-    const bucketTagLength = app.bucket ? app.bucket.length : 0
-
-    const maxDescriptionLength = availableSpace - app.appName.length - versionTagLength - bucketTagLength - 6
-
-    if (maxDescriptionLength <= 0) {
-      return '...'
-    }
-
-    if (app.description.length <= maxDescriptionLength) {
-      return app.description
-    }
-
-    let truncatedDescription = app.description.slice(0, maxDescriptionLength)
-
-    if (app.description.length > maxDescriptionLength && app.description[maxDescriptionLength] !== ' ') {
-      const lastSpaceIndex = truncatedDescription.lastIndexOf(' ')
-      if (lastSpaceIndex > 0) {
-        truncatedDescription = truncatedDescription.slice(0, lastSpaceIndex)
+    return (app: AppInfo) => {
+      // Use cached value if available
+      if (cache.has(app.appName)) {
+        return cache.get(app.appName) as string
       }
-    }
 
-    return `${truncatedDescription.trim()}...`
-  }
+      const availableSpace = 70
+      const versionStatus = getAppVersionStatus(app)
+      const versionTagLength = versionStatus.versionTag.length
+      const bucketTagLength = app.bucket ? app.bucket.length : 0
+      const maxDescriptionLength = availableSpace - app.appName.length - versionTagLength - bucketTagLength - 6
+
+      let result: string
+
+      if (maxDescriptionLength <= 0) {
+        result = '...'
+      }
+      else if (app.description.length <= maxDescriptionLength) {
+        result = app.description
+      }
+      else {
+        let truncatedDescription = app.description.slice(0, maxDescriptionLength)
+
+        if (app.description.length > maxDescriptionLength && app.description[maxDescriptionLength] !== ' ') {
+          const lastSpaceIndex = truncatedDescription.lastIndexOf(' ')
+          if (lastSpaceIndex > 0) {
+            truncatedDescription = truncatedDescription.slice(0, lastSpaceIndex)
+          }
+        }
+
+        result = `${truncatedDescription.trim()}...`
+      }
+
+      // Cache the result
+      cache.set(app.appName, result)
+      return result
+    }
+  }, [apps, appVersionInfo])
 
   async function handleCheckNewVersion(app: AppInfo) {
     const { title, message } = ToastMessages.VERSION_CHECK.LOADING(app.appName)
@@ -141,10 +183,17 @@ export default function command() {
    * Check all installed apps for available updates
    */
   async function handleCheckAllNewVersions() {
-    const loadingToast = await showLoadingToast('Checking for Updates', 'Checking all apps for new versions...')
+    // Use current filtered view or all apps depending on context
+    const appsToCheck = filteredApps
+    const scope = selectedBucket ? `in "${selectedBucket}" bucket` : ''
+
+    const loadingToast = await showLoadingToast(
+      'Checking for Updates',
+      `Checking apps ${scope} for new versions...`,
+    )
 
     const results = await Promise.all(
-      apps.map(async (app) => {
+      appsToCheck.map(async (app: AppInfo) => {
         const newVersion = await scoop.checkNewVersion(app)
         return { appName: app.appName, newVersion, lastChecked: Date.now() }
       }),
@@ -153,12 +202,16 @@ export default function command() {
     loadingToast.hide()
 
     const newCache = { ...appVersionInfo }
-    results.forEach(({ appName, newVersion, lastChecked }) => {
+    results.forEach(({ appName, newVersion, lastChecked }: {
+      appName: string
+      newVersion: string
+      lastChecked: number
+    }) => {
       newCache[appName] = { newVersion, lastChecked }
     })
     setAppVersionInfo(newCache)
 
-    const updatesAvailable = apps.filter(app => getAppVersionStatus(app).hasUpdate)
+    const updatesAvailable = appsToCheck.filter((app: AppInfo) => getAppVersionStatus(app).hasUpdate)
 
     const { title, message } = ToastMessages.VERSION_CHECK.COMPLETED(updatesAvailable.length)
     showSuccessToast(title, message)
@@ -219,17 +272,19 @@ export default function command() {
   }
 
   async function handleUpdateAllApps() {
-    const appsToUpdate = apps.filter(app => getAppVersionStatus(app).hasUpdate)
+    const currentApps = filteredApps
+    const appsToUpdate = currentApps.filter((app: AppInfo) => getAppVersionStatus(app).hasUpdate)
+    const scope = selectedBucket ? `in "${selectedBucket}" bucket` : ''
 
     if (appsToUpdate.length === 0) {
-      const { title, message } = ToastMessages.VERSION_CHECK.UP_TO_DATE('all apps')
+      const { title, message } = ToastMessages.VERSION_CHECK.UP_TO_DATE(selectedBucket || 'all apps')
       showSuccessToast(title, message)
       return
     }
 
     const confirmed = await confirmAlert({
-      title: 'Update All Apps',
-      message: `Are you sure you want to update ${appsToUpdate.length} apps?`,
+      title: 'Update Apps',
+      message: `Are you sure you want to update ${appsToUpdate.length} apps ${scope}?`.trim(),
       primaryAction: {
         title: 'Update',
         style: Alert.ActionStyle.Destructive,
@@ -242,10 +297,10 @@ export default function command() {
     if (!confirmed)
       return
 
-    const loadingToast = await showLoadingToast('Updating Apps', `Updating ${appsToUpdate.length} apps...`)
+    const loadingToast = await showLoadingToast('Updating Apps', `Updating ${appsToUpdate.length} apps ${scope}...`.trim())
 
     const updateResults = await Promise.allSettled(
-      appsToUpdate.map(async (app) => {
+      appsToUpdate.map(async (app: AppInfo) => {
         try {
           await scoop.updateNewVersion(app)
           const updatedApp = await scoop.getAppInfo(app.appName)
@@ -265,7 +320,7 @@ export default function command() {
       }),
     )
 
-    updateResults.forEach((result) => {
+    updateResults.forEach((result: PromiseSettledResult<any>) => {
       if (result.status === 'fulfilled') {
         const { success, app, updatedApp, error } = result.value
 
@@ -417,8 +472,20 @@ export default function command() {
     <List
       isLoading={isLoading}
       searchBarPlaceholder="Search Scoop apps..."
+      searchBarAccessory={(
+        <List.Dropdown
+          tooltip="Filter by Bucket"
+          storeValue={true}
+          onChange={newValue => setSelectedBucket(newValue === 'all' ? null : newValue)}
+        >
+          <List.Dropdown.Item title="All Buckets" value="all" />
+          {buckets.map((bucket: string) => (
+            <List.Dropdown.Item key={bucket} title={bucket} value={bucket} />
+          ))}
+        </List.Dropdown>
+      )}
     >
-      {apps.map(app => (
+      {filteredApps.map((app: AppInfo) => (
         <List.Item
           key={app.appName}
           icon={{ fileIcon: join(app.dirPath, app.exeName) }}
