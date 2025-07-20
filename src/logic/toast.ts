@@ -70,6 +70,31 @@ export const ToastMessages = {
     }),
 
   },
+
+  // App search related messages
+  APP_SEARCH: {
+    LOADING: () => ({ title: 'Loading Apps', message: 'Fetching available apps from buckets...' }),
+    FAILED: (error?: string) => ({
+      title: 'Error Loading Apps',
+      message: error ? `Failed to load available apps: ${error}` : 'Failed to load available apps',
+    }),
+    REFRESH_LOADING: (bucket?: string) => ({
+      title: 'Refreshing Available Apps',
+      message: bucket ? `Refreshing apps from ${bucket} bucket...` : 'Refreshing all available apps...',
+    }),
+    REFRESH_COMPLETED: (count: number) => ({
+      title: 'Apps Refreshed',
+      message: `Successfully loaded ${count} available apps`,
+    }),
+  },
+  APP_INSTALL: {
+    LOADING: (appName: string) => ({ title: 'Installing App', message: `Installing ${appName}...` }),
+    SUCCESS: (appName: string) => ({ title: 'App Installed', message: `Successfully installed ${appName}` }),
+    FAILED: (appName: string, error?: string) => ({
+      title: 'Installation Failed',
+      message: error ? `Failed to install ${appName}: ${error}` : `Failed to install ${appName}`,
+    }),
+  },
 }
 
 export function showSuccessToast(title: string, message: string) {

@@ -19,6 +19,12 @@
       "title": "List Scoop Packages",
       "description": "Lists all installed scoop packages.",
       "mode": "view"
+    },
+    {
+      "name": "scoop-search",
+      "title": "Search Scoop Packages",
+      "description": "Searches for scoop packages by name.",
+      "mode": "view"
     }
   ],
   "preferences": [

@@ -1,5 +1,5 @@
-import { access, constants, readFile } from 'node:fs/promises'
-import { join } from 'node:path/posix'
+import { access, constants, readdir, readFile } from 'node:fs/promises'
+import { join, parse } from 'node:path/posix'
 import { arch } from 'node:process'
 import { getPreferenceValues } from '@raycast/api'
 import { clean } from 'semver'
@@ -49,12 +49,26 @@ export interface AppInfo {
   bucket: string
 }
 
+export interface AvailableAppInfo {
+  appName: string
+  description: string
+  version: string
+  homepage: string
+  bucket: string
+  installed: boolean
+}
+
 export class Scoop {
   private scoopRoot: string
 
   constructor() {
     const settings = getPreferenceValues<{ scoopRoot: string }>()
     this.scoopRoot = settings.scoopRoot.trim() || ''
+  }
+
+  // 添加获取 Scoop 根目录的方法
+  getScoopRoot(): string {
+    return this.scoopRoot
   }
 
   private async isValidScoopRoot(): Promise<boolean> {
@@ -297,7 +311,7 @@ export class Scoop {
     }
   }
 
-  async uninstallApp(app: AppInfo) {
+  async uninstallApp(app: { appName: string, bucket: string }) {
     try {
       await execPromise(`scoop uninstall ${app.bucket}/${app.appName}`)
     }
@@ -312,6 +326,15 @@ export class Scoop {
     }
     catch (error) {
       throw new Error(`无法重置应用 ${app.appName}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
+  async installApp(bucket: string, appName: string) {
+    try {
+      await execPromise(`scoop install ${bucket}/${appName}`)
+    }
+    catch (error) {
+      throw new Error(`Failed to install app ${appName}: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
 
@@ -338,5 +361,90 @@ export class Scoop {
       appDirNameArr.map(appName => this.getAppInfo(appName)),
     )
     return appList.filter(Boolean) as AppInfo[]
+  }
+
+  async getInstalledApps(): Promise<Set<string>> {
+    try {
+      const installedAppsList = await this.getScoopList()
+      return new Set(installedAppsList.map(app => app.appName.toLowerCase()))
+    }
+    catch {
+      return new Set()
+    }
+  }
+
+  async getAllBuckets(): Promise<string[]> {
+    if (!this.scoopRoot)
+      throw new Error('Scoop root is not set. Please set it in preferences.')
+    const bucketsPath = join(this.scoopRoot, 'buckets')
+    try {
+      const dirs = await readdir(bucketsPath, { withFileTypes: true })
+      return dirs.filter(dir => dir.isDirectory()).map(dir => dir.name)
+    }
+    catch {
+      return []
+    }
+  }
+
+  async readAppManifest(filePath: string, bucket: string, installedApps: Set<string>): Promise<AvailableAppInfo | null> {
+    try {
+      let content: string
+      try {
+        content = await readFile(filePath, 'utf-8')
+      }
+      catch {
+        return null
+      }
+      let manifest: any
+      try {
+        manifest = JSON.parse(content)
+      }
+      catch {
+        return null
+      }
+      const fileName = parse(filePath).name.toLowerCase()
+      const description = Array.isArray(manifest.description)
+        ? manifest.description[0] || ''
+        : manifest.description || ''
+      return {
+        appName: fileName,
+        description: description.trim(),
+        version: manifest.version || '',
+        homepage: manifest.homepage || '',
+        bucket,
+        installed: installedApps.has(fileName.toLowerCase()),
+      }
+    }
+    catch {
+      return null
+    }
+  }
+
+  async loadAppsFromBucket(bucketName: string, installedApps: Set<string>): Promise<AvailableAppInfo[]> {
+    if (!this.scoopRoot)
+      throw new Error('Scoop root is not set. Please set it in preferences.')
+    const bucketPath = join(this.scoopRoot, 'buckets', bucketName, 'bucket')
+    let files: string[]
+    try {
+      files = await readdir(bucketPath)
+    }
+    catch {
+      return []
+    }
+    const jsonFiles = files.filter(file => file.endsWith('.json'))
+    if (jsonFiles.length === 0)
+      return []
+    const BATCH_SIZE = 50
+    const apps: AvailableAppInfo[] = []
+    for (let i = 0; i < jsonFiles.length; i += BATCH_SIZE) {
+      const batch = jsonFiles.slice(i, i + BATCH_SIZE)
+      const manifestPromises = batch.map(file => this.readAppManifest(join(bucketPath, file), bucketName, installedApps))
+      const results = await Promise.allSettled(manifestPromises)
+      results.forEach((result) => {
+        if (result.status === 'fulfilled' && result.value)
+          apps.push(result.value)
+      })
+    }
+    return apps
   }
 }
